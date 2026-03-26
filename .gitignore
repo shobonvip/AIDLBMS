@@ -1,0 +1,4 @@
+*.db
+table_data/
+table/
+.env
