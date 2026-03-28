@@ -25,7 +25,11 @@ class TkinterHandler(logging.Handler):
 		self.text_widget.configure(state='disabled') # 読み取り専用に戻す
 
 class TableSelector(tk.Tk):
-	def __init__(self, data_dir, songdata_db_path):
+	def __init__(
+		self,
+		data_dir: str,
+		songdata_db_path: str
+	):
 		super().__init__()
 		self.title("AI # BMS # DL")
 		self.geometry("1000x800")
@@ -36,7 +40,10 @@ class TableSelector(tk.Tk):
 		self.setup_ui()
 		self.setup_logging()
 
-	def load_tables(self, directory):
+	# 難易度表を読み込む
+	def load_tables(self,
+		directory: str
+	):
 		tables = {}
 		for json_file in Path(directory).glob("*.json"):
 			try:
@@ -52,6 +59,7 @@ class TableSelector(tk.Tk):
 				print(f"Error loading {json_file}: {e}")
 		return tables
 
+	# GUI セットアップ
 	def setup_ui(self):
 
 		main_frame = ttk.Frame(self)
@@ -127,6 +135,7 @@ class TableSelector(tk.Tk):
 		self.log_widget = scrolledtext.ScrolledText(log_frame, height=10, state='disabled')
 		self.log_widget.pack(fill="both", expand=True)
 
+	# ログを起動
 	def setup_logging(self):
 		# 1. ロガーの作成
 		self.logger = logging.getLogger("BMS_Loader")
@@ -150,6 +159,7 @@ class TableSelector(tk.Tk):
 
 		self.logger.info("プログラムが起動しました。")
 
+	# 譜面選択したとき
 	def download_selected(self):
 		selected_iids = self.song_tree.selection()
 		if not selected_iids:
@@ -169,7 +179,7 @@ class TableSelector(tk.Tk):
 			else:
 				self.logger.info(f"差分URLが見つかりませんでした。")
 
-
+	# 難易度表の未所持譜面一覧を更新する
 	def update_song_list(self, missing_songs):
 		self.current_missing_songs = missing_songs
 
@@ -187,6 +197,8 @@ class TableSelector(tk.Tk):
 				)
 			)
 
+	# 難易度表を選んだ時の処理
+	# 未所持譜面を抜き出して表示させる
 	def on_table_select(self):
 		selected_item = self.tree.selection()
 		if selected_item:
