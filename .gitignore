@@ -4,3 +4,4 @@ table/
 .env
 dl_file/
 log_*.txt
+screenshot_*.png
