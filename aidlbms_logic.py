@@ -1,40 +1,89 @@
 import asyncio
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Error, TimeoutError as PWTimeoutError
 from pathlib import Path
+from PIL import Image
+import io
+from dotenv import load_dotenv
+import os
+from google import genai
 
-async def fetch_and_download(url: str):
+def setup_gemini():
+	api_key = os.environ.get("GEMINI_API_KEY")
+	if not api_key:
+		raise ValueError("環境変数 'GEMINI_API_KEY' が設定されていません。")
+	
+	return genai.Client(api_key=api_key)
+
+async def auto_download_inner(url, page, logger = None):
+	def _log(m):
+		if logger:
+			logger.info(m)
+		else:
+			print(m)
+
+	complete = False
+	page_loaded = False
+	download_task = asyncio.create_task(page.wait_for_event("download"))
+
+	try:
+		try:
+			_log(f"{url} にアクセスします")		
+			await page.goto(url, timeout=10000)
+			_log(f"ページを読み込みました")
+			page_loaded = True
+			download = await asyncio.wait_for(download_task, timeout=2.0)
+		except asyncio.TimeoutError:
+			_log(f"自動DLがありませんでした。")
+			await page.screenshot(path="screenshot.png")
+			return False
+		except PWTimeoutError:
+			_log(f"ページ読み込みに失敗しました")
+			return False
+		except Error as e:
+			if "Download is starting" in str(e):
+				_log(f"ページを読み込みました（直リンク）")
+				page_loaded = True
+				download = await download_task
+			else:
+				raise e
+	
+		assert download != None
+		_log(f"ダウンロードを開始します。")
+		await download.save_as(f"dl_file/{download.suggested_filename}")
+		_log(f"ダウンロードが完了しました。")
+		complete = True
+		return complete
+	except Error as e:
+		_log(f"自動DL 失敗! {e}")
+		pass
+	finally:
+		pass
+
+
+async def auto_download(url: str, logger = None) -> bool:
+	def _log(m):
+		if logger:
+			logger.info(m)
+		else:
+			print(m)
+
+	save_dir = Path("dl_file")
+	save_dir.mkdir(exist_ok = True)
+
 	async with async_playwright() as p:
 		browser = await p.chromium.launch(headless=True)
-		context = await browser.new_context()
+		context = await browser.new_context(viewport={"width":720, "height":1280})
 		page = await context.new_page()
 
-		print(f"URLを開いています: {url}")
-		
-		await page.goto(url, wait_until="networkidle")
-		html_content = await page.content()
-		print("--- HTML Content (First 500 chars) ---")
-		print(html_content[:500])
-		print("---------------------------------------")
-
 		try:
-			print("ダウンロードを待機中... (ボタンを手動で押すか、AIに押させてください)")
-			async with page.expect_download(timeout=60000) as download_info:
-				pass
-			download = await download_info.value
-			
-			# 保存先の作成
-			save_path = Path("dl_file") / download.suggested_filename
-			save_path.parent.mkdir(exist_ok=True)
-			
-			# ファイルを保存
-			await download.save_as(save_path)
-			print(f"ダウンロード完了: {save_path}")
-
+			return await auto_download_inner(url, page, logger)
 		except Exception as e:
-			print(f"ダウンロードが発生しませんでした、またはタイムアウトしました: {e}")
-
-		await browser.close()
+			_log(f"接続に失敗しました")
+			print(f"接続失敗: {e}")
+			return False
+		finally:
+			await browser.close()
 
 if __name__ == "__main__":
-	target_url = "https://example.com"  # テストしたいURL
-	asyncio.run(fetch_and_download(target_url))
+	target_url = "https://bms.hexlataia.xyz/mirror/gnqg-upload/05466.zip"  # テストしたいURL
+	asyncio.run(auto_download(target_url))

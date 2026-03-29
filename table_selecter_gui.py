@@ -6,7 +6,9 @@ import table_find_missing_songs
 import logging
 from tkinter import scrolledtext
 from datetime import datetime
-
+import aidlbms_logic
+import threading
+import asyncio
 
 """loggingの出力をTkinterのテキストエリアに流し込むハンドラ"""
 class TkinterHandler(logging.Handler):
@@ -165,20 +167,40 @@ class TableSelector(tk.Tk):
 		if not selected_iids:
 			self.logger.info("曲が選択されていません。")
 			return
-		
+
+		selected_song_data = []
 		for iid in selected_iids:
 			idx = self.song_tree.index(iid)
 			song_data = self.current_missing_songs[idx]
-			self.logger.info(f"{song_data['title']} が選択されました。DLを開始します。")
-			if song_data['url'].startswith("http"):
-				self.logger.info(f"本体URL {song_data['url']} にアクセスします。")
-			else:
-				self.logger.info(f"本体URLが見つかりませんでした。")
-			if song_data['appendurl'].startswith("http"):
-				self.logger.info(f"差分URL {song_data['appendurl']} にアクセスします。")
-			else:
-				self.logger.info(f"差分URLが見つかりませんでした。")
+			selected_song_data.append(song_data)
 
+		
+		def autodl_sequencer():
+			for song_data in selected_song_data:
+				self.logger.info(f"{song_data['title']} のDLを開始します。")
+				if song_data['url'].startswith("http"):
+					self.logger.info(f"本体URL {song_data['url']} にアクセスします。")
+					url_success = asyncio.run(aidlbms_logic.auto_download(song_data['url'], self.logger))
+					if not url_success:
+						self.logger.info(f"【重要】本体の DL に失敗しました。URL: {song_data['url']}")
+				else:
+					self.logger.info(f"本体URLが見つかりませんでした。")
+
+				if song_data['appendurl'].startswith("http"):
+					self.logger.info(f"差分URL {song_data['appendurl']} にアクセスします。")
+					url_success = asyncio.run(aidlbms_logic.auto_download(song_data['appendurl'], self.logger))
+					if not url_success:
+						self.logger.info(f"【重要】差分の DL に失敗しました。URL: {song_data['appendurl']}")
+				else:
+					self.logger.info(f"差分URLが見つかりませんでした。")
+				self.logger.info(f"{song_data['title']} のDLが完了しました")
+
+		thread = threading.Thread(
+			target = autodl_sequencer,
+			daemon = True
+		)
+		thread.start()
+			
 	# 難易度表の未所持譜面一覧を更新する
 	def update_song_list(self, missing_songs):
 		self.current_missing_songs = missing_songs
