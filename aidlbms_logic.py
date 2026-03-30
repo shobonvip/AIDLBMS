@@ -9,6 +9,9 @@ from google import genai
 from google.genai import types
 import json
 import random
+from bs4 import BeautifulSoup
+from bs4 import Comment
+import re
 
 XSIZE = 720
 YSIZE = 1280
@@ -27,28 +30,86 @@ async def download_file(download, _log):
 	_log(f"ダウンロードが完了しました。")
 
 
+def clean_html_for_ai(raw_html):
+	soup = BeautifulSoup(raw_html, 'lxml')
+	irrelevant_tags = [
+		'script', 'style', 'svg', 'canvas', 'iframe', 'noscript', 'head', 'meta', 'link',
+		'header', 'footer', 'nav', 'aside', 'picture', 'figure', 'video', 'audio',
+		'amp-ad', 'ins'
+	]
+	for tag in soup(irrelevant_tags):
+		tag.decompose()
+	for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+		comment.extract()
+	
+	important_tags = soup.find_all(['a', 'button', 'input'])
+	minimal_soup = BeautifulSoup("<html><body></body></html>", 'lxml')
+	body = minimal_soup.body
+
+	for tag in important_tags:
+		href = tag.get('href', '')
+		if "event.cgi" in href: continue
+
+		parent_clone = tag.find_parent('div')
+		if parent_clone:
+			allowed_attrs = ['id', 'class']
+			parent_clone.attrs = {n: v for n, v in parent_clone.attrs.items() if n in allowed_attrs}
+			body.append(parent_clone)
+		else:
+			body.append(tag)
+	
+	cleaned_html = re.sub(r'\s+', ' ', minimal_soup.decode()).strip()
+
+	matches = []
+	
+	vocab = ["download", "ダウンロード"]
+	for keyword in vocab:
+		matches += list(
+			re.finditer(re.escape(keyword), cleaned_html, re.IGNORECASE)
+		)
+
+	for match in matches:
+		start_idx = max(0, match.start() - 100)
+		end_idx = min(len(cleaned_html), match.end() + 400)
+		return cleaned_html[start_idx:end_idx]
+
+	return None
+
+
 async def ai_action(
 	title: str,
 	file_type: str,
 	page,
-	logger
+	_log
 ):
 	
 	now_page = [page]
 	scrolled_time = 0
 
-	def _log(m):
-		if logger:
-			logger.info(m)
-		else:
-			print(m)
-	
 	try:
 		load_dotenv()
 		client = setup_gemini()
 	except Exception as e:
 		_log(f"エラー: {e}")
 		return False
+
+	def prompt_html(url):
+		return f"""
+		This is a HTML snippet for BMS file ({file_type}) download page
+		The title of the song is {title}
+		URL for this webpage is "{url}"
+		identify the SINGLE most likely URL for the main file download
+
+		Rules
+		- Prioritize direct links (.zip, .rar, .lzh, .7z).
+		- If no direct link, pick external uploaders (uploader.jp, drive.google.com, dropbox.com, mega.nz, etc.).
+		- Ignore navigation links, ads, or social media.
+		- Ignore same url as shown.
+		- Output as absolute path. 
+
+		If there is no good URL (or only same url as shown), output null JSON.
+		Output JSON: {{"target_url": "string"}}
+		"""
 
 	# 初回のプロンプト
 	prompt_first = f"""
@@ -80,57 +141,121 @@ async def ai_action(
 	If you want to scroll the browser, output {{"scroll": 1}}.
 	Example output: {{"x": 326, "y": 125}}
 	"""
+
 	img_old = None
 	for try_num in range(1, AI_MAX_TRY + 1):
 		_log(f"{try_num}/{AI_MAX_TRY} 回目のAI試行です")
-		try:
-			#screenshot_bytes = await now_page[-1].screenshot(path=f"screenshot_{random.randrange(1000)}.png")
-			screenshot_bytes = await now_page[-1].screenshot()
-			img = Image.open(io.BytesIO(screenshot_bytes))
-		
-			if img_old == None:
-				response = await client.aio.models.generate_content(
-					model = "gemini-3.1-flash-lite-preview",
-					contents = [prompt_first, img],
-					config = types.GenerateContentConfig(
-						response_mime_type = "application/json",
-						temperature = 0.1
-					)
-				)
-			else:
-				response = await client.aio.models.generate_content(
-					model = "gemini-3.1-flash-lite-preview",
-					contents = [prompt_second, img_old, img],
-					config = types.GenerateContentConfig(
-						response_mime_type = "application/json",
-						temperature = 0.1
-					)
-				)
-			
-			img_old = img
-			result = json.loads(response.text)
-			_log(f"AI解析完了: {result}")
 
-			if "scroll" in result:
-				# スクロールをする
-				await now_page[-1].evaluate(f"window.scrollBy(0, {YSIZE})")
-				await asyncio.sleep(2.0)
-				scrolled_time += 1
-				continue
-			elif not result or "x" not in result or "y" not in result:
-				# だめなので False
-				return False
+		try:
+			goto_query = False
+			click_query = False
+			complete_query = False
+
+			# HTML を解析
+			html_content = await now_page[-1].content()
+			html_likely_dl_url = clean_html_for_ai(html_content)
 			
-			# クリック
-			targ_x = int(result['x'] / 1000 * XSIZE)
-			targ_y = int(result['y'] / 1000 * YSIZE)
-			_log(f"{targ_x}, {targ_y} をクリックします")
+			if html_likely_dl_url != None:
+				print(html_likely_dl_url)
+				try:
+					response = await client.aio.models.generate_content(
+						model = "gemini-3.1-flash-lite-preview",
+						contents = [prompt_html(now_page[-1].url), html_likely_dl_url],
+						config = types.GenerateContentConfig(
+							response_mime_type = "application/json",
+							temperature = 0.1
+						)
+					)
+				except Exception as e:
+					print(f"エラー: {e}")
+					return False
+
+
+				result = json.loads(response.text)
+				_log(f"テキストAI解析完了: {result}")
+
+				if "target_url" in result:
+					goto_target_url = result.get("target_url")
+					_log(f"AIが次のURLを特定: {goto_target_url}")
+					goto_query = True
+					complete_query = True
+				else:
+					_log(f"テキストデータからはDLリンクが見つけられませんでした")
+
+			if not complete_query:
+				#スクリーンショットを取り、AIに投げる
+				#screenshot_bytes = await now_page[-1].screenshot(path=f"screenshot_{random.randrange(1000)}.png")
+				screenshot_bytes = await now_page[-1].screenshot()
+				img = Image.open(io.BytesIO(screenshot_bytes))
+
+				try:		
+					if img_old == None:
+						response = await client.aio.models.generate_content(
+							model = "gemini-3.1-flash-lite-preview",
+							contents = [prompt_first, img],
+							config = types.GenerateContentConfig(
+								response_mime_type = "application/json",
+								temperature = 0.1
+							)
+						)
+					else:
+						response = await client.aio.models.generate_content(
+							model = "gemini-3.1-flash-lite-preview",
+							contents = [prompt_second, img_old, img],
+							config = types.GenerateContentConfig(
+								response_mime_type = "application/json",
+								temperature = 0.1
+							)
+						)				
+				except Exception as e:
+					print(f"エラー: {e}")
+					return False
+
+				img_old = img
+				result = json.loads(response.text)
+				_log(f"AI解析完了: {result}")
+
+				if "scroll" in result:
+					# スクロールをする
+					await now_page[-1].evaluate(f"window.scrollBy(0, {YSIZE})")
+					await asyncio.sleep(2.0)
+					scrolled_time += 1
+					complete_query = True
+					continue
+				elif not result or "x" not in result or "y" not in result:
+					pass
+				else:
+					targ_x = int(result['x'] / 1000 * XSIZE)
+					targ_y = int(result['y'] / 1000 * YSIZE)
+					click_query = True
+					complete_query = True
 			
 			dl_task = asyncio.create_task(now_page[-1].wait_for_event("download"))
 			nav_task = asyncio.create_task(now_page[-1].wait_for_load_state("load"))
 			popup_task = asyncio.create_task(now_page[-1].context.wait_for_event("page"))
 		
-			await now_page[-1].mouse.click(targ_x, targ_y)
+			if not complete_query:
+				_log("だめだったので諦めます。")
+				return False
+
+			# クリック
+			if click_query:
+				_log(f"{targ_x}, {targ_y} をクリックします")
+				await now_page[-1].mouse.click(targ_x, targ_y)
+			elif goto_query:
+				try:
+					await now_page[-1].goto(goto_target_url, timeout=12000)
+				except PWTimeoutError:
+					# ページ読み込み失敗！
+					_log(f"ページ読み込みに失敗しました")
+					return False
+				except Error as e:
+					# 直リンクなので、甘えてダウンロードをする
+					if "Download is starting" in str(e):
+						_log(f"ページを読み込みました（直リンク）")
+					else:
+						raise e
+
 
 			# まずは2秒監視
 			await asyncio.sleep(2.0)
@@ -181,13 +306,7 @@ async def ai_action(
 
 
 
-async def auto_download_inner(title: str, url: str, file_type: str, page, logger = None):
-	def _log(m):
-		if logger:
-			logger.info(m)
-		else:
-			print(m)
-
+async def auto_download_inner(title: str, url: str, file_type: str, page, _log):
 	complete = False
 	page_loaded = False
 	download_task = asyncio.create_task(page.wait_for_event("download"))
@@ -207,7 +326,7 @@ async def auto_download_inner(title: str, url: str, file_type: str, page, logger
 			_log(f"自動DLがありませんでした。AI自動DLを試みます")
 
 			result = await ai_action(
-				title, file_type, page, logger
+				title, file_type, page, _log
 			)
 
 			if result:
@@ -258,7 +377,9 @@ async def auto_download(title: str, url: str, file_type: str, logger = None) -> 
 		page = await context.new_page()
 
 		try:
-			return await auto_download_inner(title, url, file_type, page, logger)
+			return await auto_download_inner(
+				title, url, file_type, page, _log
+				)
 		except Exception as e:
 			_log(f"接続に失敗しました")
 			print(f"接続失敗: {e}")
