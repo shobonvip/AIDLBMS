@@ -180,7 +180,7 @@ class TableSelector(tk.Tk):
 				self.logger.info(f"{song_data['title']} のDLを開始します。")
 				if song_data['url'].startswith("http"):
 					self.logger.info(f"本体URL {song_data['url']} にアクセスします。")
-					url_success = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['url'], "本体", self.logger))
+					url_success = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['url'], "本体", song_data['md5'], self.logger))
 					if not url_success:
 						self.logger.info(f"【重要】本体の DL に失敗しました。URL: {song_data['url']}")
 				else:
@@ -188,7 +188,7 @@ class TableSelector(tk.Tk):
 
 				if song_data['appendurl'].startswith("http"):
 					self.logger.info(f"差分URL {song_data['appendurl']} にアクセスします。")
-					url_success = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['appendurl'], "差分", self.logger))
+					url_success = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['appendurl'], "差分", song_data['md5'], self.logger))
 					if not url_success:
 						self.logger.info(f"【重要】差分の DL に失敗しました。URL: {song_data['appendurl']}")
 				else:
@@ -215,7 +215,8 @@ class TableSelector(tk.Tk):
 				values = (
 					song.get("title", "-"),
 					song.get("url", "-"),
-					song.get("appendurl", "-")
+					song.get("appendurl", "-"),
+					song.get("md5", "-")
 				)
 			)
 

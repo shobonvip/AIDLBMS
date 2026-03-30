@@ -13,9 +13,9 @@ from bs4 import BeautifulSoup
 from bs4 import Comment
 import re
 
-XSIZE = 720
-YSIZE = 1280
-AI_MAX_TRY = 7
+XSIZE = 1536
+YSIZE = 2304
+AI_MAX_TRY = 9
 
 def setup_gemini():
 	api_key = os.environ.get("GEMINI_API_KEY")
@@ -69,8 +69,8 @@ def clean_html_for_ai(raw_html):
 		)
 
 	for match in matches:
-		start_idx = max(0, match.start() - 100)
-		end_idx = min(len(cleaned_html), match.end() + 400)
+		start_idx = max(0, match.start() - 200)
+		end_idx = min(len(cleaned_html), match.end() + 800)
 		return cleaned_html[start_idx:end_idx]
 
 	return None
@@ -80,11 +80,14 @@ async def ai_action(
 	title: str,
 	file_type: str,
 	page,
+	song_md5,
 	_log
 ):
 	
 	now_page = [page]
 	scrolled_time = 0
+	url_history = {page.url}
+	LR2IR_used = False
 
 	try:
 		load_dotenv()
@@ -95,7 +98,7 @@ async def ai_action(
 
 	def prompt_html(url):
 		return f"""
-		This is a HTML snippet for BMS file ({file_type}) download page
+		This is a HTML snippet for 発狂BMS file ({file_type}) download page
 		The title of the song is {title}
 		URL for this webpage is "{url}"
 		identify the SINGLE most likely URL for the main file download
@@ -106,6 +109,7 @@ async def ai_action(
 		- Ignore navigation links, ads, or social media.
 		- Ignore same url as shown.
 		- Output as absolute path. 
+		- If URL is not ended, return null.
 
 		If there is no good URL (or only same url as shown), output null JSON.
 		Output JSON: {{"target_url": "string"}}
@@ -113,11 +117,12 @@ async def ai_action(
 
 	# 初回のプロンプト
 	prompt_first = f"""
-	This is a screenshot for BMS file ({file_type}) download page.
+	This is a screenshot for 発狂BMS file ({file_type}) download page.
 	The title of the song is {title}.
 
 	Analyze the image and the find good to click for downloading the target file.
 	Return the center coordinates (x,y) where to click within this image.
+	If there is no DL url but have Difficulty Table, prefer Table.
 	
 	Output the result as a raw JSON object with keys "x", "y".
 	If there is no good way, output null JSON.
@@ -127,7 +132,7 @@ async def ai_action(
 
 	# 二回目以降のプロンプト
 	prompt_second = f"""
-	This is a screenshot for BMS file ({file_type}) download page.
+	This is a screenshot for 発狂BMS file ({file_type}) download page.
 	The title of the song is {title}.
 
 	The first image is previous one, and the second image is current one.
@@ -135,57 +140,28 @@ async def ai_action(
 
 	Analyze the images and the find good to click for downloading the target file.
 	Return the center coordinates (x,y) where to click within this image.
+	If there is no DL url but have Difficulty Table, prefer Table.
 	
 	Output the result as a raw JSON object with keys "x", "y".
 	If there is no good way, output null JSON.
 	If you want to scroll the browser, output {{"scroll": 1}}.
 	Example output: {{"x": 326, "y": 125}}
 	"""
-
+	
 	img_old = None
 	for try_num in range(1, AI_MAX_TRY + 1):
 		_log(f"{try_num}/{AI_MAX_TRY} 回目のAI試行です")
 
 		try:
+			url_history.add(now_page[-1].url)
 			goto_query = False
 			click_query = False
 			complete_query = False
 
-			# HTML を解析
-			html_content = await now_page[-1].content()
-			html_likely_dl_url = clean_html_for_ai(html_content)
-			
-			if html_likely_dl_url != None:
-				print(html_likely_dl_url)
-				try:
-					response = await client.aio.models.generate_content(
-						model = "gemini-3.1-flash-lite-preview",
-						contents = [prompt_html(now_page[-1].url), html_likely_dl_url],
-						config = types.GenerateContentConfig(
-							response_mime_type = "application/json",
-							temperature = 0.1
-						)
-					)
-				except Exception as e:
-					print(f"エラー: {e}")
-					return False
-
-
-				result = json.loads(response.text)
-				_log(f"テキストAI解析完了: {result}")
-
-				if "target_url" in result:
-					goto_target_url = result.get("target_url")
-					_log(f"AIが次のURLを特定: {goto_target_url}")
-					goto_query = True
-					complete_query = True
-				else:
-					_log(f"テキストデータからはDLリンクが見つけられませんでした")
-
 			if not complete_query:
 				#スクリーンショットを取り、AIに投げる
-				#screenshot_bytes = await now_page[-1].screenshot(path=f"screenshot_{random.randrange(1000)}.png")
-				screenshot_bytes = await now_page[-1].screenshot()
+				screenshot_bytes = await now_page[-1].screenshot(path=f"screenshot_{random.randrange(1000)}.png")
+				#screenshot_bytes = await now_page[-1].screenshot()
 				img = Image.open(io.BytesIO(screenshot_bytes))
 
 				try:		
@@ -214,15 +190,17 @@ async def ai_action(
 				img_old = img
 				result = json.loads(response.text)
 				_log(f"AI解析完了: {result}")
-
-				if "scroll" in result:
+				
+				if not result:
+					pass
+				elif "scroll" in result:
 					# スクロールをする
 					await now_page[-1].evaluate(f"window.scrollBy(0, {YSIZE})")
 					await asyncio.sleep(2.0)
 					scrolled_time += 1
 					complete_query = True
 					continue
-				elif not result or "x" not in result or "y" not in result:
+				elif not result or "x" not in result or "y" not in result or not result['x'] or not result['y']:
 					pass
 				else:
 					targ_x = int(result['x'] / 1000 * XSIZE)
@@ -230,13 +208,57 @@ async def ai_action(
 					click_query = True
 					complete_query = True
 			
+			if not complete_query:
+				# HTML を解析
+				html_content = await now_page[-1].content()
+				html_likely_dl_url = clean_html_for_ai(html_content)
+				
+				if html_likely_dl_url != None:
+					print(html_likely_dl_url)
+					try:
+						response = await client.aio.models.generate_content(
+							model = "gemini-3.1-flash-lite-preview",
+							contents = [prompt_html(now_page[-1].url), html_likely_dl_url],
+							config = types.GenerateContentConfig(
+								response_mime_type = "application/json",
+								temperature = 0.0
+							)
+						)
+					except Exception as e:
+						print(f"エラー: {e}")
+						return False
+
+
+					result = json.loads(response.text)
+					_log(f"テキストAI解析完了: {result}")
+
+					if result and "target_url" in result and result.get("target_url") != None:	
+						goto_target_url = result.get("target_url")
+						if goto_target_url not in url_history:
+							_log(f"AIが次のURLを特定: {goto_target_url}")
+							goto_query = True
+							complete_query = True
+							url_history.add(goto_target_url)
+						else:
+							_log(f"テキストデータからは次の遷移先が見つけられませんでした")
+					else:
+						_log(f"テキストデータからはDLリンクが見つけられませんでした")
+
+			
 			dl_task = asyncio.create_task(now_page[-1].wait_for_event("download"))
 			nav_task = asyncio.create_task(now_page[-1].wait_for_load_state("load"))
 			popup_task = asyncio.create_task(now_page[-1].context.wait_for_event("page"))
 		
 			if not complete_query:
-				_log("だめだったので諦めます。")
-				return False
+				if not LR2IR_used:
+					goto_target_url = f"http://www.dream-pro.info/~lavalse/LR2IR/search.cgi?mode=ranking&bmsmd5={song_md5}"
+					goto_query = True
+					complete_query = True
+					_log("LR2IR を検索します。")
+					LR2IR_used = True
+				else:
+					_log("だめだったので諦めます。")
+					return False
 
 			# クリック
 			if click_query:
@@ -306,7 +328,7 @@ async def ai_action(
 
 
 
-async def auto_download_inner(title: str, url: str, file_type: str, page, _log):
+async def auto_download_inner(title: str, url: str, file_type: str, page, song_md5: str, _log):
 	complete = False
 	page_loaded = False
 	download_task = asyncio.create_task(page.wait_for_event("download"))
@@ -326,7 +348,7 @@ async def auto_download_inner(title: str, url: str, file_type: str, page, _log):
 			_log(f"自動DLがありませんでした。AI自動DLを試みます")
 
 			result = await ai_action(
-				title, file_type, page, _log
+				title, file_type, page, song_md5, _log
 			)
 
 			if result:
@@ -361,7 +383,7 @@ async def auto_download_inner(title: str, url: str, file_type: str, page, _log):
 		pass
 
 
-async def auto_download(title: str, url: str, file_type: str, logger = None) -> bool:
+async def auto_download(title: str, url: str, file_type: str, song_md5: str, logger = None) -> bool:
 	def _log(m):
 		if logger:
 			logger.info(m)
@@ -378,7 +400,7 @@ async def auto_download(title: str, url: str, file_type: str, logger = None) -> 
 
 		try:
 			return await auto_download_inner(
-				title, url, file_type, page, _log
+				title, url, file_type, page, song_md5, _log
 				)
 		except Exception as e:
 			_log(f"接続に失敗しました")
