@@ -10,6 +10,7 @@ import aidlbms_logic
 import threading
 import asyncio
 import unpack_handler
+import table_data_expander
 import os
 
 """loggingの出力をTkinterのテキストエリアに流し込むハンドラ"""
@@ -295,5 +296,7 @@ class TableSelector(tk.Tk):
 				pass
 
 if __name__ == "__main__":
+	table_data_expander.startup_sequence()
+	
 	app = TableSelector("./table_data", "./songdata.db")
 	app.mainloop()
