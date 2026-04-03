@@ -4,8 +4,11 @@ import zipfile
 import py7zr
 import rarfile
 from pathlib import Path
+import hello_gemini
+import json
+import types
 
-def smart_unpacker(file_path, extract_dir, file_name, logger = None):
+async def smart_unpacker(file_path, extract_dir, file_name, title, logger = None):
 	def _log(m):
 		if logger:
 			logger.info(m)
@@ -19,7 +22,11 @@ def smart_unpacker(file_path, extract_dir, file_name, logger = None):
 	ext = os.path.splitext(file_path)[1].lower()
 
 	try:
-		if ext == ".zip":
+		# extract_dir に解凍 (もしくはコピー)
+		if ext.startswith(".bm"):
+			dest_file_path = os.path.join(extract_dir, os.path.basename(file_path))
+			shutil.copy2(file_path, dest_file_path)
+		elif ext == ".zip":
 			with zipfile.ZipFile(file_path, 'r') as f:
 				f.extractall(extract_dir)
 		elif ext == ".7z":
@@ -33,7 +40,8 @@ def smart_unpacker(file_path, extract_dir, file_name, logger = None):
 
 		_log(f"解凍成功: {os.path.basename(file_path)}")
 		_log(f"フォルダに抜き出します。")
-		if not extract_bms(extract_dir, f"download_song/{file_name}", file_name, _log):
+		result = await extract_bms(extract_dir, f"download_song/{file_name}", file_name, title, _log)
+		if not result:
 			_log(f"フォルダ抜き出しに失敗しました。")
 			return False
 		else:
@@ -62,7 +70,7 @@ def move_folder_contents(src_dir, dst_dir):
 			else: dest_item.unlink()
 		shutil.move(str(item), str(dst_dir))
 
-def extract_bms(extract_dir, final_dest_dir, file_name, _log):
+async def extract_bms(extract_dir, final_dest_dir, file_name, title, _log):
 	temp_path = Path(extract_dir)
 	dest_path = Path(final_dest_dir)
 	dest_path.mkdir(parents=True, exist_ok=True)
@@ -85,5 +93,44 @@ def extract_bms(extract_dir, final_dest_dir, file_name, _log):
 		move_folder_contents(target_dir, dest_path)
 		return True
 	
-	_log(f"【Case C】複数のBMSフォルダを検知（{len(bms_dirs)}個）。AIに判定を依頼します。（未実装）")
+	_log(f"CASE C: 複数のBMSフォルダを検知（{len(bms_dirs)}個）。AIに判定を依頼します。")
+
+	folder_names = [d.name for d in bms_dirs]
+	hello_gemini.setup_gemini()
+	
+	prompt = f"""
+    Candidate Folders: {folder_names}
+
+    From the candidate folders above, identify the most likely folder that contains the matching data.
+    Title: {title}
+    FileName: {file_name}
+
+	If there is not suitable one, return null JSON.
+    Output JSON format: {{"best_folder": "folder_name_string"}}
+    """
+
+	try:
+		response = await client.aio.models.generate_content(
+			model = "gemini-3.1-flash-lite-preview",
+			contents = [prompt],
+			config = types.GenerateContentConfig(
+				response_mime_type = "application/json",
+				temperature = 0.1
+			)
+		)
+
+		if not response or (not response["best_folder"]):
+			_log("AIが適切なファイルを見つけられませんでした。")
+			return False
+
+		target_dir = next((d for d in bms_dirs if d.name == chosen_name), bms_dirs[0])
+		_log(f"AIがフォルダを選択しました: {target_dir.name}")
+		move_folder_contents(target_dir, dest_path)
+
+		return True
+	except Exception as e:
+		print(f"エラー: {e}")
+		return False
+
+
 	return False

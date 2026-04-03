@@ -13,17 +13,11 @@ from bs4 import BeautifulSoup
 from bs4 import Comment
 import re
 import os
+import hello_gemini
 
 XSIZE = 1536
 YSIZE = 2304
-AI_MAX_TRY = 9
-
-def setup_gemini():
-	api_key = os.environ.get("GEMINI_API_KEY")
-	if not api_key:
-		raise ValueError("環境変数 'GEMINI_API_KEY' が設定されていません。")
-	
-	return genai.Client(api_key=api_key)
+AI_MAX_TRY = 10
 
 async def download_file(download, _log):
 	_log(f"ダウンロードを開始します。")
@@ -34,6 +28,7 @@ async def download_file(download, _log):
 	return file_path
 
 
+# AI抜き出し
 def clean_html_for_ai(raw_html):
 	soup = BeautifulSoup(raw_html, 'lxml')
 	irrelevant_tags = [
@@ -80,6 +75,27 @@ def clean_html_for_ai(raw_html):
 	return None
 
 
+# google drive をスキップする
+def google_drive_converter(url):
+    """
+    Google Driveの各種URLからファイルIDを抜き出し、
+    直接アクセス用URL（uc?id=）に変換する。
+    """
+    # IDを抽出するための正規表現パターン
+    # 1. /file/d/([ID])/... 形式
+    # 2. id=([ID]) 形式
+    # の両方をキャプチャする
+    pattern = r'(?:/file/d/|id=)([a-zA-Z0-9_-]{25,})'
+    match = re.search(pattern, url)
+    
+    if match:
+        file_id = match.group(1)
+        # 直リンクURLを構築
+        direct_url = f"https://drive.google.com/uc?id={file_id}"
+        return direct_url
+	
+    return None
+
 async def ai_action(
 	title: str,
 	file_type: str,
@@ -94,11 +110,12 @@ async def ai_action(
 	LR2IR_used = False
 
 	try:
-		load_dotenv()
-		client = setup_gemini()
+		client = hello_gemini.setup_gemini()
 	except Exception as e:
 		_log(f"エラー: {e}")
 		return None
+
+	
 
 	def prompt_html(url):
 		return f"""
@@ -163,6 +180,19 @@ async def ai_action(
 			goto_query = False
 			click_query = False
 			complete_query = False
+			wait_seconds = 2.0
+
+			if not complete_query:
+				google_drive_urls = [
+					"https://drive.google.com/file/d/"
+	#				"https://drive.usercontent.google.com/download?id="
+				]
+				if any(now_page[-1].url.startswith(t) for t in google_drive_urls):
+					goto_target_url = google_drive_converter(now_page[-1].url)
+					if goto_target_url:
+						_log(f"{goto_target_url} がおそらく DL URL です")
+						goto_query = True
+						complete_query = True
 
 			if not complete_query:
 				#スクリーンショットを取り、AIに投げる
@@ -272,6 +302,7 @@ async def ai_action(
 				_log(f"{targ_x}, {targ_y} をクリックします")
 				await now_page[-1].mouse.click(targ_x, targ_y)
 			elif goto_query:
+				_log(f"{goto_target_url} に遷移します")
 				try:
 					await now_page[-1].goto(goto_target_url, timeout=12000)
 				except PWTimeoutError:
@@ -285,16 +316,15 @@ async def ai_action(
 					else:
 						raise e
 
-
 			# まずは2秒監視
-			await asyncio.sleep(2.0)
+			await asyncio.sleep(wait_seconds)
 	
 			if not (dl_task.done() or nav_task.done() or popup_task.done()):
 				_log("まだ何も起きていないので、追加で監視を続けます...")
 				done, pending = await asyncio.wait(
 					[nav_task, dl_task, popup_task],
 					return_when=asyncio.FIRST_COMPLETED,
-					timeout=8.0
+					timeout=10.5 - wait_seconds
 				)
 
 			# タスクの中断

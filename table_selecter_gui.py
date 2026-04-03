@@ -189,6 +189,7 @@ class TableSelector(tk.Tk):
 					file_path = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['url'], "本体", song_data['md5'], self.logger))
 					if not file_path:
 						self.logger.info(f"【重要】本体の DL に失敗しました。URL: {song_data['url']}")
+						continue
 					else:
 						
 						file_name = os.path.splitext(
@@ -206,6 +207,7 @@ class TableSelector(tk.Tk):
 					appendfile_path = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['appendurl'], "差分", song_data['md5'], self.logger))
 					if not appendfile_path:
 						self.logger.info(f"【重要】差分の DL に失敗しました。URL: {song_data['appendurl']}")
+						continue
 					else:
 						appendfile_path_complete = True
 				else:
@@ -218,9 +220,28 @@ class TableSelector(tk.Tk):
 				if file_path_complete and appendfile_path_complete:
 					self.logger.info(f"両者ダウンロードに成功したので解凍します")
 					if file_path:
-						unpack_handler.smart_unpacker(file_path, "dl_tmp_file/main_file", file_name, self.logger)
+						unpack_main_success = asyncio.run(unpack_handler.smart_unpacker(
+							file_path,
+							"dl_tmp_file/main_file",
+							file_name, song_data['title'],
+							self.logger
+						))
+						if not unpack_main_success:
+							self.logger.info("本体の導入に失敗しました")
+							continue
 					if file_path and appendfile_path:
-						unpack_handler.smart_unpacker(appendfile_path, "dl_tmp_file/append_file", file_name, self.logger)
+						unpack_append_success = asyncio.run(unpack_handler.smart_unpacker(
+							appendfile_path,
+							"dl_tmp_file/append_file",
+							file_name,
+							song_data['title'],
+							self.logger
+						))
+						if not unpack_append_success:
+							self.logger.info("差分の導入に失敗しました")
+							continue
+				
+				self.logger.info(f"{song_data['title']} の導入に成功しました")
 				
 
 		thread = threading.Thread(
@@ -265,7 +286,7 @@ class TableSelector(tk.Tk):
 				missing_songs = table_find_missing_songs.find_missing_songs(
 					json_path, table_index, self.md5_set
 				)
-				self.logger.info(f"難易度表 {table_name} の未所持譜面は {len(missing_songs)} 個ありました。")
+				self.logger.info(f"難易度表 {table_name} / {item_text} の未所持譜面は {len(missing_songs)} 個ありました。")
 				self.update_song_list(missing_songs)
 				#for songs in missing_songs:
 				#	print(songs["title"], songs["artist"], songs["url"], songs["appendurl"])
