@@ -12,6 +12,7 @@ import random
 from bs4 import BeautifulSoup
 from bs4 import Comment
 import re
+import os
 
 XSIZE = 1536
 YSIZE = 2304
@@ -26,8 +27,11 @@ def setup_gemini():
 
 async def download_file(download, _log):
 	_log(f"ダウンロードを開始します。")
-	await download.save_as(f"dl_file/{download.suggested_filename}")
+	_log(f"{download.suggested_filename}")
+	file_path = f"dl_tmp_file/{download.suggested_filename}"
+	await download.save_as(file_path)
 	_log(f"ダウンロードが完了しました。")
+	return file_path
 
 
 def clean_html_for_ai(raw_html):
@@ -94,7 +98,7 @@ async def ai_action(
 		client = setup_gemini()
 	except Exception as e:
 		_log(f"エラー: {e}")
-		return False
+		return None
 
 	def prompt_html(url):
 		return f"""
@@ -123,6 +127,7 @@ async def ai_action(
 	Analyze the image and the find good to click for downloading the target file.
 	Return the center coordinates (x,y) where to click within this image.
 	If there is no DL url but have Difficulty Table, prefer Table.
+	Prefer {file_type} or "通常版" button.
 	
 	Output the result as a raw JSON object with keys "x", "y".
 	If there is no good way, output null JSON.
@@ -141,7 +146,8 @@ async def ai_action(
 	Analyze the images and the find good to click for downloading the target file.
 	Return the center coordinates (x,y) where to click within this image.
 	If there is no DL url but have Difficulty Table, prefer Table.
-	
+	Prefer "{file_type}" or "通常版" button.
+
 	Output the result as a raw JSON object with keys "x", "y".
 	If there is no good way, output null JSON.
 	If you want to scroll the browser, output {{"scroll": 1}}.
@@ -160,8 +166,8 @@ async def ai_action(
 
 			if not complete_query:
 				#スクリーンショットを取り、AIに投げる
-				screenshot_bytes = await now_page[-1].screenshot(path=f"screenshot_{random.randrange(1000)}.png")
-				#screenshot_bytes = await now_page[-1].screenshot()
+				#screenshot_bytes = await now_page[-1].screenshot(path=f"screenshot_{random.randrange(1000)}.png")
+				screenshot_bytes = await now_page[-1].screenshot()
 				img = Image.open(io.BytesIO(screenshot_bytes))
 
 				try:		
@@ -185,7 +191,7 @@ async def ai_action(
 						)				
 				except Exception as e:
 					print(f"エラー: {e}")
-					return False
+					return None
 
 				img_old = img
 				result = json.loads(response.text)
@@ -226,7 +232,7 @@ async def ai_action(
 						)
 					except Exception as e:
 						print(f"エラー: {e}")
-						return False
+						return None
 
 
 					result = json.loads(response.text)
@@ -249,6 +255,7 @@ async def ai_action(
 			nav_task = asyncio.create_task(now_page[-1].wait_for_load_state("load"))
 			popup_task = asyncio.create_task(now_page[-1].context.wait_for_event("page"))
 		
+			# 何もできない（主にリンク切れ）の処理
 			if not complete_query:
 				if not LR2IR_used:
 					goto_target_url = f"http://www.dream-pro.info/~lavalse/LR2IR/search.cgi?mode=ranking&bmsmd5={song_md5}"
@@ -258,9 +265,9 @@ async def ai_action(
 					LR2IR_used = True
 				else:
 					_log("だめだったので諦めます。")
-					return False
+					return None
 
-			# クリック
+			# クリックの処理
 			if click_query:
 				_log(f"{targ_x}, {targ_y} をクリックします")
 				await now_page[-1].mouse.click(targ_x, targ_y)
@@ -270,7 +277,7 @@ async def ai_action(
 				except PWTimeoutError:
 					# ページ読み込み失敗！
 					_log(f"ページ読み込みに失敗しました")
-					return False
+					return None
 				except Error as e:
 					# 直リンクなので、甘えてダウンロードをする
 					if "Download is starting" in str(e):
@@ -290,6 +297,7 @@ async def ai_action(
 					timeout=8.0
 				)
 
+			# タスクの中断
 			for task in [dl_task, nav_task, popup_task]:
 				if not task.done():
 					task.cancel()
@@ -301,8 +309,8 @@ async def ai_action(
 			# ダウンロード
 			if dl_task.done() and not dl_task.cancelled():
 				download = await dl_task
-				await download_file(download, _log)
-				return True
+				ret_file = await download_file(download, _log)
+				return ret_file
 
 			# 新しいタブが開いたとき
 			if popup_task.done() and not popup_task.cancelled():
@@ -319,14 +327,11 @@ async def ai_action(
 				continue
 
 			_log(f"遷移を試みましたが、何も起きませんでした")
-			return False
+			return None
 
 		except Exception as e:
 			_log(f"エラー: {e}")
-			return False
-
-
-
+			return None
 
 async def auto_download_inner(title: str, url: str, file_type: str, page, song_md5: str, _log):
 	complete = False
@@ -361,7 +366,7 @@ async def auto_download_inner(title: str, url: str, file_type: str, page, song_m
 		except PWTimeoutError:
 			# ページ読み込み失敗！
 			_log(f"ページ読み込みに失敗しました")
-			return False
+			return None
 		except Error as e:
 			# 直リンクなので、甘えてダウンロードをする
 			if "Download is starting" in str(e):
@@ -373,12 +378,11 @@ async def auto_download_inner(title: str, url: str, file_type: str, page, song_m
 	
 		assert download != None
 
-		await download_file(download, _log)
-		complete = True
-		return complete
+		ret_file = await download_file(download, _log)
+		return ret_file
 	except Error as e:
 		_log(f"自動DL 失敗! {e}")
-		pass
+		return None
 	finally:
 		pass
 
@@ -390,7 +394,7 @@ async def auto_download(title: str, url: str, file_type: str, song_md5: str, log
 		else:
 			print(m)
 
-	save_dir = Path("dl_file")
+	save_dir = Path("dl_tmp_file")
 	save_dir.mkdir(exist_ok = True)
 
 	async with async_playwright() as p:
@@ -405,7 +409,7 @@ async def auto_download(title: str, url: str, file_type: str, song_md5: str, log
 		except Exception as e:
 			_log(f"接続に失敗しました")
 			print(f"接続失敗: {e}")
-			return False
+			return None
 		finally:
 			await browser.close()
 

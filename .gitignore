@@ -2,6 +2,10 @@
 table_data/
 table/
 .env
-dl_file/
-log_*.txt
+
+aidlenv/
+
 screenshot_*.png
+download_song/
+dl_tmp_file/
+log/

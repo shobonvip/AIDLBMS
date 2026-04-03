@@ -9,6 +9,8 @@ from datetime import datetime
 import aidlbms_logic
 import threading
 import asyncio
+import unpack_handler
+import os
 
 """loggingの出力をTkinterのテキストエリアに流し込むハンドラ"""
 class TkinterHandler(logging.Handler):
@@ -147,7 +149,7 @@ class TableSelector(tk.Tk):
 		formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', '%H:%M:%S')
 
 		# 3. ファイルへの保存設定 (log_20260329.txt のような名前にする)
-		log_filename = datetime.now().strftime("log_%Y%m%d.txt")
+		log_filename = datetime.now().strftime("log/log_%Y%m%d.txt")
 		file_handler = logging.FileHandler(log_filename, encoding='utf-8')
 		file_handler.setFormatter(formatter)
 
@@ -177,23 +179,49 @@ class TableSelector(tk.Tk):
 		
 		def autodl_sequencer():
 			for song_data in selected_song_data:
+				file_path_complete = False
+				appendfile_path_complete = False
+
+				# 本体DL
 				self.logger.info(f"{song_data['title']} のDLを開始します。")
 				if song_data['url'].startswith("http"):
 					self.logger.info(f"本体URL {song_data['url']} にアクセスします。")
-					url_success = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['url'], "本体", song_data['md5'], self.logger))
-					if not url_success:
+					file_path = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['url'], "本体", song_data['md5'], self.logger))
+					if not file_path:
 						self.logger.info(f"【重要】本体の DL に失敗しました。URL: {song_data['url']}")
+					else:
+						
+						file_name = os.path.splitext(
+								os.path.basename(file_path)
+							)[0]
+						file_path_complete = True
 				else:
 					self.logger.info(f"本体URLが見つかりませんでした。")
+					file_path = None
+					file_path_complete = True
 
+				# 差分DL.
 				if song_data['appendurl'].startswith("http"):
 					self.logger.info(f"差分URL {song_data['appendurl']} にアクセスします。")
-					url_success = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['appendurl'], "差分", song_data['md5'], self.logger))
-					if not url_success:
+					appendfile_path = asyncio.run(aidlbms_logic.auto_download(song_data['title'], song_data['appendurl'], "差分", song_data['md5'], self.logger))
+					if not appendfile_path:
 						self.logger.info(f"【重要】差分の DL に失敗しました。URL: {song_data['appendurl']}")
+					else:
+						appendfile_path_complete = True
 				else:
 					self.logger.info(f"差分URLが見つかりませんでした。")
+					appendfile_path = None
+					appendfile_path_complete = True
 				self.logger.info(f"{song_data['title']} のDLが完了しました")
+
+
+				if file_path_complete and appendfile_path_complete:
+					self.logger.info(f"両者ダウンロードに成功したので解凍します")
+					if file_path:
+						unpack_handler.smart_unpacker(file_path, "dl_tmp_file/main_file", file_name, self.logger)
+					if file_path and appendfile_path:
+						unpack_handler.smart_unpacker(appendfile_path, "dl_tmp_file/append_file", file_name, self.logger)
+				
 
 		thread = threading.Thread(
 			target = autodl_sequencer,
