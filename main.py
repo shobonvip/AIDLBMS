@@ -1,3 +1,5 @@
+VERSION = "V 1.2"
+
 import json
 import tkinter as tk
 from tkinter import ttk
@@ -16,6 +18,7 @@ import os
 import rarfile
 import subprocess
 import sys
+
 
 """loggingの出力をTkinterのテキストエリアに流し込むハンドラ"""
 class TkinterHandler(logging.Handler):
@@ -40,7 +43,7 @@ class TableSelector(tk.Tk):
 		songdata_db_path: str
 	):
 		super().__init__()
-		self.title("AI # BMS # DL V1.0")
+		self.title(f"AI # BMS # DL {VERSION}")
 		self.geometry("1000x800")
 		self.table_data = self.load_tables(data_dir)
 		self.md5_set = table_find_missing_songs.get_owned_md5_set(songdata_db_path)
