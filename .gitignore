@@ -5,7 +5,7 @@ table/
 
 aidlenv/
 aidlbms.code-workspace
-settings.json
+./settings.json
 
 screenshot_*.png
 download_song/

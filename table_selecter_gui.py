@@ -13,6 +13,9 @@ import unpack_handler
 import table_data_expander
 import os
 
+import subprocess
+import sys
+
 """loggingの出力をTkinterのテキストエリアに流し込むハンドラ"""
 class TkinterHandler(logging.Handler):
 	def __init__(self, text_widget):
@@ -295,7 +298,21 @@ class TableSelector(tk.Tk):
 				#print(f"難易度表全体を選択: {item_text} ({self.item_metadata[target_item]['path']})")
 				pass
 
+
+def ensure_playwright():
+	try:
+		# chromium があるか適当なコマンドでチェック
+		subprocess.run(["playwright", "install", "chromium"], check=True)
+		return True
+	except Exception:
+		print("Playwright のセットアップに失敗しました。")
+	return False
+
 if __name__ == "__main__":
+	if not ensure_playwright():
+		input()
+		exit()
+
 	table_dir_path, songdata_db_path = table_data_expander.startup_sequence()
 	
 	app = TableSelector("./table_data", songdata_db_path)
