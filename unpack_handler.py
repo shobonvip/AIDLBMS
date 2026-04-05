@@ -6,7 +6,7 @@ import rarfile
 from pathlib import Path
 import hello_gemini
 import json
-import types
+from google.genai import types
 
 async def smart_unpacker(file_path, extract_dir, file_name, title, logger = None):
 	def _log(m):
@@ -96,7 +96,7 @@ async def extract_bms(extract_dir, final_dest_dir, file_name, title, _log):
 	_log(f"CASE C: 複数のBMSフォルダを検知（{len(bms_dirs)}個）。AIに判定を依頼します。")
 
 	folder_names = [d.name for d in bms_dirs]
-	hello_gemini.setup_gemini()
+	client = hello_gemini.setup_gemini()
 	
 	prompt = f"""
     Candidate Folders: {folder_names}
@@ -119,11 +119,12 @@ async def extract_bms(extract_dir, final_dest_dir, file_name, title, _log):
 			)
 		)
 
-		if not response or (not response["best_folder"]):
+		result = json.loads(response.text)
+		if not result or (not result["best_folder"]):
 			_log("AIが適切なファイルを見つけられませんでした。")
 			return False
 
-		target_dir = next((d for d in bms_dirs if d.name == chosen_name), bms_dirs[0])
+		target_dir = next((d for d in bms_dirs if d.name == result["best_folder"]), bms_dirs[0])
 		_log(f"AIがフォルダを選択しました: {target_dir.name}")
 		move_folder_contents(target_dir, dest_path)
 
@@ -134,3 +135,14 @@ async def extract_bms(extract_dir, final_dest_dir, file_name, title, _log):
 
 
 	return False
+
+if __name__ == "__main__":
+	import asyncio
+	title = "20年以上のソナタ"
+	in_file = "./dl_tmp_file/main_file/"
+	out_file = "./dl_tmp_file/go_file/"
+	file_name = "20年以上のソナタ [wav]"
+
+	asyncio.run(extract_bms(in_file, out_file, file_name, title,
+		lambda x:print(x)
+	))
