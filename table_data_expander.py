@@ -34,43 +34,50 @@ def extract_all_bmt(
 
 SETTINGS_FILE = "settings.json"
 
-def save_settings(target_dir_path):
+def save_settings(target_dir_path, songdata_db_path):
 	"""パスをJSONファイルに保存する"""
 	with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-		json.dump({"target_dir_path": target_dir_path}, f, indent=4, ensure_ascii=False)
+		json.dump({
+			"target_dir_path": target_dir_path,
+			"songdata_db_path": songdata_db_path
+		}, f, indent=4, ensure_ascii=False)
 
 def startup_sequence():
-	target_path = None
 	dialog = InitialSetupDialog()
-	target_path = dialog.run()
+	target_dir_path, songdata_db_path = dialog.run()
 
 	# パスが確定したら保存
-	if target_path:
-		save_settings(target_path)
+	if target_dir_path:
+		save_settings(target_dir_path, songdata_db_path)
 	else:
 		return None # キャンセル時
 
 	# 3. 確定したパスで BMT 抽出
-	extract_all_bmt(target_dir_path=target_path, output_dir_name="./table_data")
-	return target_path
+	extract_all_bmt(target_dir_path=target_dir_path, output_dir_name="./table_data")
+	return target_dir_path, songdata_db_path
 
 class InitialSetupDialog:
 	def __init__(self):
 		self.root = tk.Tk()
 		self.root.title("初期設定 - BMS Table フォルダ選択")
-		self.root.geometry("500x150")
-		self.result_path = None
-		# 1. ラベル
-		tk.Label(self.root, text="BMS Table のパスを指定してください:").pack(anchor="w", padx=10, pady=(15, 0))
+		self.root.geometry("500x250")
+		self.result_target_dir_path = None
+		self.result_songdata_db_path = None
 
-		# 2. Entry と Browse ボタンのフレーム
-		self.frame_path = tk.Frame(self.root)
-		self.frame_path.pack(fill="x", padx=10, pady=5)
-		
-		self.entry_path = tk.Entry(self.frame_path)
-		self.entry_path.pack(side="left", fill="x", expand=True, padx=(0, 5))
-		
-		tk.Button(self.frame_path, text="Browse", command=self.browse_folder).pack(side="right")
+		tk.Label(self.root, text="table フォルダのパスを指定してください:").pack(anchor="w", padx=10, pady=(15, 0))
+		self.frame_target_dir_path = tk.Frame(self.root)
+		self.frame_target_dir_path.pack(fill="x", padx=10, pady=5)		
+		self.entry_target_dir_path = tk.Entry(self.frame_target_dir_path)
+		self.entry_target_dir_path.pack(side="left", fill="x", expand=True, padx=(0, 5))
+		tk.Button(self.frame_target_dir_path, text="Browse", command=self.browse_folder).pack(side="right")
+
+		tk.Label(self.root, text="songdata.db のパスを指定してください:").pack(anchor="w", padx=10, pady=(15, 0))
+		self.frame_songdata_db_path = tk.Frame(self.root)
+		self.frame_songdata_db_path.pack(fill="x", padx=10, pady=5)		
+		self.entry_songdata_db_path = tk.Entry(self.frame_songdata_db_path)
+		self.entry_songdata_db_path.pack(side="left", fill="x", expand=True, padx=(0, 5))
+		tk.Button(self.frame_songdata_db_path, text="Browse", command=self.browse_db).pack(side="right")
+
 
 		# 3. 決定ボタン
 		tk.Button(self.root, text="OK / 起動", command=self.confirm_and_close, width=15, bg="#e1e1e1").pack(pady=10)
@@ -85,7 +92,9 @@ class InitialSetupDialog:
 				with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
 					settings = json.load(f)
 					target_dir_path = settings.get("target_dir_path", "")
-					if target_dir_path: self.entry_path.insert(0, target_dir_path)
+					songdata_db_path = settings.get("songdata_db_path", "")
+					if target_dir_path: self.entry_target_dir_path.insert(0, target_dir_path)
+					if songdata_db_path: self.entry_songdata_db_path.insert(0, songdata_db_path)
 					return
 
 			except Exception:
@@ -93,29 +102,43 @@ class InitialSetupDialog:
 		return {}
 
 	def browse_folder(self):
-		"""フォルダ選択ダイアログを開き、Entryに反映する"""
 		folder = filedialog.askdirectory(title="table を選択")
 		if folder:
-			self.entry_path.delete(0, tk.END)
-			self.entry_path.insert(0, folder)
+			self.entry_target_dir_path.delete(0, tk.END)
+			self.entry_target_dir_path.insert(0, folder)
+	
+	def browse_db(self):
+		filename = filedialog.askopenfilename(filetypes=[("SQLite DB", "*.db")])
+		if filename:
+			self.entry_songdata_db_path.delete(0, tk.END)
+			self.entry_songdata_db_path.insert(0, filename)
 
 	def confirm_and_close(self):
-		"""入力されたパスを検証して保存し、終了する"""
-		path = self.entry_path.get().strip()
-		if os.path.isdir(path):
-			self.result_path = path
-			self.root.destroy()
+		target_dir_path = self.entry_target_dir_path.get().strip()
+		if os.path.isdir(target_dir_path):
+			self.result_target_dir_path = target_dir_path
 		else:
-			messagebox.showerror("エラー", "有効なディレクトリを選択してください。")
+			messagebox.showerror("エラー", "table: 有効なディレクトリを選択してください。")
+			return
+		
+		songdata_db_path = self.entry_songdata_db_path.get().strip()
+		if os.path.isfile(songdata_db_path):
+			self.result_songdata_db_path = songdata_db_path
+		else:
+			messagebox.showerror("エラー", "songdata.db: 有効なファイルを選択してください。")
+			return
+
+		self.root.destroy()
+		
 
 	def on_close(self):
-		"""×ボタンで閉じられた場合"""
-		self.result_path = None
+		self.result_target_dir_path = None
+		self.result_songdata_db_path = None
 		self.root.destroy()
 
 	def run(self):
 		self.root.mainloop()
-		return self.result_path
+		return self.result_target_dir_path, self.result_songdata_db_path
 
 if __name__ == "__main__":
 	startup_sequence()

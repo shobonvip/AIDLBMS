@@ -296,7 +296,7 @@ class TableSelector(tk.Tk):
 				pass
 
 if __name__ == "__main__":
-	table_data_expander.startup_sequence()
+	table_dir_path, songdata_db_path = table_data_expander.startup_sequence()
 	
-	app = TableSelector("./table_data", "./songdata.db")
+	app = TableSelector("./table_data", songdata_db_path)
 	app.mainloop()
