@@ -148,7 +148,8 @@ class TableSelector(tk.Tk):
 		# 1. ロガーの作成
 		self.logger = logging.getLogger("BMS_Loader")
 		self.logger.setLevel(logging.INFO)
-
+		if not os.path.exists("log"):
+			os.makedirs("log")
 		# 2. フォーマットの設定 (時間 - レベル - メッセージ)
 		formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', '%H:%M:%S')
 
