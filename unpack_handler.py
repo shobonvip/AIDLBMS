@@ -137,6 +137,7 @@ async def extract_bms(extract_dir, final_dest_dir, file_name, title, _log):
 	return False
 
 if __name__ == "__main__":
+	"""
 	import asyncio
 	title = "20年以上のソナタ"
 	in_file = "./dl_tmp_file/main_file/"
@@ -146,3 +147,4 @@ if __name__ == "__main__":
 	asyncio.run(extract_bms(in_file, out_file, file_name, title,
 		lambda x:print(x)
 	))
+	"""
