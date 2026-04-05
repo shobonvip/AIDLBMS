@@ -3,6 +3,7 @@ table_data/
 table/
 .env
 
+**/__pycache__/**
 aidlenv/
 aidlbms.code-workspace
 ./settings.json
