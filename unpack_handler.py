@@ -23,7 +23,7 @@ async def smart_unpacker(file_path, extract_dir, file_name, title, logger = None
 
 	try:
 		# extract_dir に解凍 (もしくはコピー)
-		if ext.startswith(".bm"):
+		if ext.startswith(".bm") or ext.startswith(".pms"):
 			dest_file_path = os.path.join(extract_dir, os.path.basename(file_path))
 			shutil.copy2(file_path, dest_file_path)
 		elif ext == ".zip":

@@ -14,9 +14,10 @@ from bs4 import Comment
 import re
 import os
 import hello_gemini
+from urllib.parse import urlparse
 
-XSIZE = 1536
-YSIZE = 2304
+XSIZE = 1000
+YSIZE = 1000
 AI_MAX_TRY = 10
 
 async def download_file(download, _log):
@@ -73,6 +74,17 @@ def clean_html_for_ai(raw_html):
 		return cleaned_html[start_idx:end_idx]
 
 	return None
+
+
+# 赤い人差分をミラーに変更
+def adhoc_fix_url(url):
+	
+	old_prefix = "http://akred.web.fc2.com/"
+	new_prefix = "https://darksabun.club/mirror/akred/"
+	if url.startswith(old_prefix):
+		return url.replace(old_prefix, new_prefix, 1)
+	
+	return url
 
 
 # google drive をスキップする
@@ -166,6 +178,7 @@ async def ai_action(
 	Prefer "{file_type}" or "通常版" button.
 
 	Output the result as a raw JSON object with keys "x", "y".
+	If there is no change between 2 images, output null JSON.
 	If there is no good way, output null JSON.
 	If you want to scroll the browser, output {{"scroll": 1}}.
 	Example output: {{"x": 326, "y": 125}}
@@ -181,6 +194,7 @@ async def ai_action(
 			click_query = False
 			complete_query = False
 			wait_seconds = 2.0
+
 
 			if not complete_query:
 				google_drive_urls = [
@@ -280,6 +294,17 @@ async def ai_action(
 					else:
 						_log(f"テキストデータからはDLリンクが見つけられませんでした")
 
+			if not complete_query:
+				if now_page[-1].url.lower().endswith(('.bms', '.bme', '.bml', '.pms')):
+					_log("bmsファイルを直接検知しました。ダウンロードを開始します。")
+					content = await now_page[-1].inner_text("body")
+					url_path = urlparse(now_page[-1].url).path
+					file_path = f"dl_tmp_file/{os.path.basename(url_path)}"
+					_log(os.path.basename(url_path))
+					with open(file_path, "w", encoding="shift-jis", errors="replace") as f:
+						f.write(content)
+					_log(f"ダウンロードが完了しました。")
+					return file_path
 			
 			dl_task = asyncio.create_task(now_page[-1].wait_for_event("download"))
 			nav_task = asyncio.create_task(now_page[-1].wait_for_load_state("load"))
@@ -302,6 +327,7 @@ async def ai_action(
 				_log(f"{targ_x}, {targ_y} をクリックします")
 				await now_page[-1].mouse.click(targ_x, targ_y)
 			elif goto_query:
+				goto_target_url = adhoc_fix_url(goto_target_url)
 				_log(f"{goto_target_url} に遷移します")
 				try:
 					await now_page[-1].goto(goto_target_url, timeout=12000)
@@ -367,6 +393,7 @@ async def auto_download_inner(title: str, url: str, file_type: str, page, song_m
 	complete = False
 	page_loaded = False
 	download_task = asyncio.create_task(page.wait_for_event("download"))
+	url = adhoc_fix_url(url)
 
 	try:
 		
@@ -447,5 +474,5 @@ if __name__ == "__main__":
 	title = "薄雲"
 
 	#target_url = "https://pupuly.nekokan.dyndns.info/bms/v/60"  # テストしたいURL
-	target_url = "https://manbow.nothing.sh/event/event.cgi?action=More_def&num=303&event=123"
-	asyncio.run(auto_download(title, target_url, "本体"))
+	target_url = "http://akred.web.fc2.com/bmsfile/Deublithick-HARDEST.bme"
+	asyncio.run(auto_download(title, target_url, "差分", "s"))

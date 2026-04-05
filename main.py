@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk
 from pathlib import Path
 import table_find_missing_songs
+import platform
 import logging
 from tkinter import scrolledtext
 from datetime import datetime
@@ -12,7 +13,7 @@ import asyncio
 import unpack_handler
 import table_data_expander
 import os
-
+import rarfile
 import subprocess
 import sys
 
@@ -310,6 +311,12 @@ def ensure_playwright():
 	return False
 
 if __name__ == "__main__":
+
+	current_os = platform.system()
+	print(current_os)
+	if current_os == "Windows":
+		rarfile.UNRAR_TOOL = "./Unrar/unrar.exe"
+
 	if not ensure_playwright():
 		input()
 		exit()
