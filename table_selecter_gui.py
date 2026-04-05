@@ -39,7 +39,7 @@ class TableSelector(tk.Tk):
 		songdata_db_path: str
 	):
 		super().__init__()
-		self.title("AI # BMS # DL")
+		self.title("AI # BMS # DL V1.0")
 		self.geometry("1000x800")
 		self.table_data = self.load_tables(data_dir)
 		self.md5_set = table_find_missing_songs.get_owned_md5_set(songdata_db_path)
