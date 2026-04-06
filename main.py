@@ -320,9 +320,9 @@ if __name__ == "__main__":
 	if current_os == "Windows":
 		rarfile.UNRAR_TOOL = "./Unrar/unrar.exe"
 
-	if not ensure_playwright():
-		input()
-		exit()
+	#if not ensure_playwright():
+	#	input()
+	#	exit()
 
 	table_dir_path, songdata_db_path = table_data_expander.startup_sequence()
 	
