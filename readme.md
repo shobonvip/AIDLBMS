@@ -8,6 +8,8 @@
 
 Windows の場合
 
+Python3 の導入が必要です。バージョンは Python 3.10-3.12 では動くと思います
+
 1. install.bat を実行してください
 2. startup.bat で起動します
 3. .env ファイルを作成し, GEMINI_API_KEY='YOUR API KEY' を付け加えます
